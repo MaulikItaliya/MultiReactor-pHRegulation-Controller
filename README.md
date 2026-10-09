@@ -1,312 +1,181 @@
-PHREG – Multi-Reactor pH Controller
+<div align="center">
 
-Detailed Technical Documentation
+# 🧪 PHREG: Multi-Reactor pH Controller
 
-1. Introduction
+**Safety-first pH regulation for up to three independent bioprocess reactors, with real hardware control over Modbus RTU.**
 
-PHREG (pH REGulation) is a robust, safety-oriented pH control system designed for real laboratory and industrial bioprocess environments.
-It supports up to three independent reactors, each controlled in isolation, using industrial-grade instrumentation.
+![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Modbus](https://img.shields.io/badge/Modbus-RTU-1E3A5F?style=for-the-badge)
+![PID](https://img.shields.io/badge/Control-PID-2C5364?style=for-the-badge)
+![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+![Status](https://img.shields.io/badge/Mode-Headless-4CAF50?style=for-the-badge)
 
-This project is not a simulation and not a teaching example.
-It is designed with the assumption that:
+</div>
 
-Sensors may fail or provide stale data
+---
 
-Communication with actuators may be unreliable
+## 📌 Overview
 
-Operators may enable or disable reactors at runtime
+**PHREG** (pH REGulation) is a safety-oriented pH controller for real laboratory and industrial bioprocess environments. It controls up to **three reactors independently**, using industrial instrumentation, and runs headless on a Linux lab or industrial PC.
 
-Safety must always override control objectives
+This is not a simulation or a teaching example. It is written on four assumptions:
 
-The controller enforces explicit safety behavior at every stage of execution.
+| Assumption | What the controller does about it |
+|---|---|
+| Sensors may fail or deliver stale data | Gas injection stops when pH is missing or stale |
+| Actuator communication may be unreliable | Any MFC communication failure forces CO₂ to 0 |
+| Operators may enable or disable reactors at runtime | Disabled reactors are isolated in software |
+| Safety must override control objectives | Every stage must succeed before it can influence hardware |
 
-2. System Overview
+---
 
-The controller interfaces with the following hardware:
+## ✨ Features
 
-MM44 multi-channel transmitters
+- 🧬 **Three independent reactors**, each with its own PID controller and integrator and no cross-coupling
+- 🔀 **Two control modes:** CO₂-only and split-range (default)
+- 🛡️ **Explicit state machine** with deterministic fail-safe behaviour
+- ⚙️ **PID with anti-windup, deadband and output clamping**
+- 🚦 **Rate-limited actuator commands** to prevent valve chatter and pressure shocks
+- 💻 **Live runtime CLI** to change setpoints, enable or disable reactors, and shut down safely
+- 📊 **JSON telemetry and command interface** for GUI or web dashboards
+- 📝 **Per-reactor CSV logging** with monthly rotation and retention cleanup
 
-pH measurement
+---
 
-Dissolved Oxygen (DO) measurement
+## 🔌 Hardware
 
-Mass Flow Controllers (MFCs)
+| Component | Role |
+|---|---|
+| **MM44 multi-channel transmitters** | pH and dissolved-oxygen (DO) measurement |
+| **Mass flow controllers (MFCs)** | AIR and CO₂ flow control |
+| **Modbus RTU over RS-485** | Communication with instruments (USB-RS485 adapter) |
+| **Host PC** | Linux lab or industrial PC running Python (headless) |
 
-AIR flow control
+**Per reactor:** 1 pH input · 1 DO input (monitored, not controlled) · 1 AIR MFC · 1 CO₂ MFC
 
-CO₂ flow control
+---
 
-Communication via Modbus RTU
+## 🏗️ Architecture
 
-Host system
+Every stage must succeed before the next stage is allowed to influence hardware.
 
-Linux-based lab PC or industrial PC
+```mermaid
+flowchart LR
+    A["MM44 sensors<br/>pH · DO"] --> B["Parsing &<br/>validation"]
+    B --> C["State machine"]
+    C --> D["Per-reactor<br/>PID control"]
+    D --> E["Rate limiting"]
+    E --> F["MFC actuation<br/>AIR / CO₂"]
+```
 
-Python runtime (headless operation)
+### State machine
 
-Each reactor has:
+```mermaid
+stateDiagram-v2
+    [*] --> INIT
+    INIT --> RUN: hardware ready
+    RUN --> DEGRADED: alarm active
+    RUN --> FAILSAFE: critical fault
+    DEGRADED --> FAILSAFE: critical fault
+    FAILSAFE --> [*]
+```
 
-One pH input
+| State | Behaviour |
+|---|---|
+| **INIT** | Hardware initialization, serial ports opened, MFC control mode set, outputs forced to safe values. No control action allowed. |
+| **RUN** | Normal closed-loop PID operation with all safety checks enforced. |
+| **DEGRADED** | Partial functionality with active alarms; control continues where it is safe. |
+| **FAILSAFE** | CO₂ forced to 0 for all reactors, AIR forced to a safe state, control disabled. The transition is immediate and deterministic. |
 
-One DO input (monitored, not controlled)
+---
 
-One AIR MFC
+## 🎛️ Control Strategy
 
-One CO₂ MFC
+**Error definition**
 
-Reactors are fully independent in software.
-
-3. Repository Structure
-
-The project is split into three logical modules for clarity and maintainability:
-
-phreg_core.py
-phreg_hardware.py
-phreg_controller.py
-
-3.1 phreg_core.py
-
-Contains pure logic and shared infrastructure:
-
-Constants and configuration defaults
-
-Reactor configuration (ReactorCfg)
-
-Utility functions (clamping, rate limiting)
-
-PID controller implementation
-
-MM44 data parsing
-
-CSV logging helpers
-
-JSON helper functions
-
-This file contains no direct hardware side effects.
-
-3.2 phreg_hardware.py
-
-Contains hardware-specific logic and safety mechanisms:
-
-Modbus RTU helpers for MFCs
-
-MM44 serial open/close helpers
-
-Channel mapping validation
-
-Alarm generation
-
-Safety output functions
-
-State machine definitions
-
-This file is responsible for safe interaction with hardware.
-
-3.3 phreg_controller.py
-
-This is the application entry point:
-
-Argument parsing
-
-Initialization logic
-
-State machine execution
-
-Main control loop
-
-Runtime CLI handling
-
-Dashboard JSON I/O
-
-CSV logging execution
-
-Safe shutdown logic
-
-This file orchestrates the entire system.
-
-4. High-Level Architecture
-
-The controller follows a deterministic execution pipeline:
-
-MM44 Sensors
-    ↓
-Parsing & Validation
-    ↓
-State Machine
-    ↓
-Per-Reactor PID Control
-    ↓
-Rate Limiting
-    ↓
-MFC Actuation (AIR / CO₂)
-
-
-Each stage must succeed before the next stage is allowed to influence hardware.
-
-5. Control Strategy
-5.1 Error Definition
-
-The pH control error is defined as:
-
+```
 error = measured_pH − pH_setpoint
+```
 
+- Positive error: pH too high, so reduce pH
+- Negative error: pH too low, so increase pH
 
-Interpretation:
+**Operating modes**
 
-Positive error → pH too high → reduce pH
+| Mode | Behaviour | Use case |
+|---|---|---|
+| **CO₂-only** | AIR held at a fixed baseline; CO₂ is used only to lower pH | Aeration must stay constant |
+| **Split-range** *(default)* | CO₂ lowers pH when too high; AIR raises pH when too low | Prevents aggressive CO₂ use and mirrors common bioprocess practice |
 
-Negative error → pH too low → increase pH
+**PID features:** configurable gains · anti-windup via integrator clamping · deadband around setpoint · output clamping.
+**Rate limiting** is applied after the PID output and before the MFC command.
 
-5.2 Operating Modes
-CO₂-Only Mode
+---
 
-AIR is held at a fixed baseline
+## 🛡️ Safety Philosophy
 
-CO₂ is used exclusively to reduce pH
+> **If anything is uncertain, do nothing dangerous.**
 
-Suitable when aeration must remain constant
+| Condition | Guaranteed behaviour |
+|---|---|
+| Missing or stale pH | No gas injection |
+| Any MFC communication failure | CO₂ = 0 |
+| Reactor disabled | Isolated in software |
+| AIR baseline | Clamped to a minimum safe value |
+| Startup and shutdown | Explicit safe sequence |
+| Failures | No silent fallbacks |
 
-Split-Range Mode (Default)
+---
 
-CO₂ reduces pH when pH is too high
+## 🚀 Quick Start
 
-AIR increases pH when pH is too low
+**Requirements:** Python 3.9+ · Linux (recommended) · USB-RS485 adapter
 
-Prevents aggressive CO₂ usage
+```bash
+git clone https://github.com/MaulikItaliya/MultiReactor-pHRegulation-Controller.git
+cd MultiReactor-pHRegulation-Controller
+pip install pyserial minimalmodbus
+python phreg_controller.py
+```
 
-Mirrors real bioprocess control practice
+**Optional flags**
 
-5.3 PID Control
+| Flag | Purpose |
+|---|---|
+| `--no_mfc` | Run without MFC hardware |
+| `--log_enable` | Enable CSV logging |
+| `--mm44_ports` | Serial port(s) of the MM44 transmitters |
+| `--mfc` | MFC connection settings |
 
-Each reactor has:
+> Run `python phreg_controller.py --help` for the exact argument formats.
 
-Its own PID controller
+---
 
-Its own integrator
+## 💻 Runtime Interaction
 
-No cross-coupling between reactors
+### Command-line interface
 
-Features:
+Available while the controller is running. Changes apply immediately and safely.
 
-Configurable gains
+| Command | Description |
+|---|---|
+| `sp R1 7.40` | Set the pH setpoint for reactor 1 |
+| `air R1 20` | Set the AIR baseline for reactor 1 |
+| `enable R2 on` / `enable R2 off` | Enable or disable reactor 2 |
+| `status` | Print system state |
+| `raw on` / `raw off` | Toggle raw MM44 output |
+| `q` | Safe shutdown |
 
-Anti-windup via integrator clamping
+### Dashboard JSON interface
 
-Deadband around setpoint
+| File | Direction | Content |
+|---|---|---|
+| `/tmp/mm44_latest.json` | Controller → dashboard | System state, active alarms, per-reactor sensor values, actuator commands |
+| `/tmp/mm44_cmd.json` | Dashboard → controller | Setpoint, AIR baseline and enable commands |
 
-Output clamping
+Example command:
 
-5.4 Rate Limiting
-
-All actuator commands are rate-limited to:
-
-Prevent valve chatter
-
-Prevent pressure shocks
-
-Reduce mechanical wear
-
-Rate limits are applied after PID computation.
-
-6. State Machine
-
-The controller operates in four states:
-
-6.1 INIT
-
-Hardware initialization
-
-Serial port opening
-
-MFC control mode setup
-
-Outputs forced to safe values
-
-No control action is allowed.
-
-6.2 RUN
-
-Normal closed-loop operation
-
-PID control active
-
-All safety checks enforced
-
-6.3 DEGRADED
-
-Partial functionality
-
-Active alarms
-
-Control continues where safe
-
-6.4 FAILSAFE
-
-CO₂ forced to 0 for all reactors
-
-AIR forced to safe state
-
-Control action disabled
-
-Transition to FAILSAFE is immediate and deterministic.
-
-7. Safety Philosophy
-
-The controller follows one strict rule:
-
-If anything is uncertain, do nothing dangerous.
-
-Guaranteed behaviors:
-
-Missing or stale pH → no gas injection
-
-Any MFC communication failure → CO₂ = 0
-
-Disabled reactor → isolated in software
-
-AIR baseline clamped to minimum safe value
-
-Explicit safe startup and shutdown
-
-There are no silent fallbacks.
-
-8. Runtime Interaction
-8.1 Command-Line Interface (CLI)
-
-Available while the controller is running:
-
-sp R1 7.40        # Set pH setpoint
-air R1 20         # Set AIR baseline
-enable R2 on      # Enable reactor
-enable R2 off     # Disable reactor
-status            # Print system state
-raw on|off        # Toggle raw MM44 output
-q                 # Safe shutdown
-
-
-Changes apply immediately and safely.
-
-8.2 Dashboard JSON Interface
-Telemetry output
-/tmp/mm44_latest.json
-
-
-Contains:
-
-System state
-
-Active alarms
-
-Per-reactor sensor values
-
-Actuator commands
-
-Command input
-/tmp/mm44_cmd.json
-
-
-Example:
-
+```json
 {
   "ts": "2026-02-07T12:30:00",
   "rid": 1,
@@ -314,84 +183,57 @@ Example:
   "air_baseline": 25,
   "enabled": true
 }
+```
 
+### CSV logging
 
-Designed for GUI or web dashboards.
+- One CSV file per reactor, one row per minute
+- Monthly file rotation with retention-based cleanup
+- Purpose: experiment traceability, validation and post-analysis
 
-8.3 CSV Logging
+---
 
-One CSV file per reactor
+## 📁 Repository Structure
 
-One row per minute
+```
+MultiReactor-pHRegulation-Controller/
+├── phreg_controller.py                 # Entry point, state machine, control loop, CLI
+├── phreg_core.py                       # Config, PID, rate limiting, MM44 parsing, logging helpers
+├── phreg_multi_reactor_controller.py   # Multi-reactor controller
+├── PHREG.slx                           # Simulink model
+├── dashboard/                          # Dashboard assets
+├── dashboard.html                      # Browser dashboard
+└── README.md
+```
 
-Monthly file rotation
+<!-- TODO: add one line each for phreg_multi_reactor_controller.py, PHREG.slx and dashboard/ once you've confirmed what they contain. -->
 
-Retention-based cleanup
+| Module | Responsibility |
+|---|---|
+| `phreg_core.py` | Pure logic and shared infrastructure: constants, `ReactorCfg`, clamping and rate-limit helpers, PID, MM44 parsing, CSV and JSON helpers. No direct hardware side effects. |
+| `phreg_controller.py` | Application entry point: argument parsing, initialization, state machine, main control loop, runtime CLI, dashboard JSON I/O, CSV logging, safe shutdown. |
 
-Purpose:
+---
 
-Experiment traceability
+## 🎯 Intended Audience
 
-Validation
+Control engineers · embedded systems developers · industrial automation engineers · research laboratories running live experiments. Familiarity with PID control, Modbus RTU and industrial instrumentation is assumed.
 
-Post-analysis
+---
 
-9. Installation & Execution
-9.1 Requirements
+## 🧭 Design Principles
 
-Python 3.9+
+- **Correctness over elegance**
+- **Explicit safety over clever abstractions**
+- **Real hardware behaviour over theoretical purity**
 
-Linux (recommended)
+The codebase is intentionally conservative, verbose and defensive.
 
-USB-RS485 adapter
+---
 
-9.2 Dependencies
-pip install pyserial minimalmodbus
+## 👤 Author
 
-9.3 Run
-python phreg_controller.py
+**Maulik Italiya**: Embedded Hardware & Systems · M.Sc. Embedded Systems Design, Hochschule Bremerhaven
 
-
-Optional flags:
-
---no_mfc
---log_enable
---mm44_ports
---mfc
-
-10. Intended Audience
-
-This project is intended for:
-
-Control engineers
-
-Embedded systems developers
-
-Industrial automation engineers
-
-Research laboratories running live experiments
-
-It assumes familiarity with:
-
-PID control
-
-Modbus RTU
-
-Industrial instrumentation
-
-11. Design Summary
-
-This controller prioritizes:
-
-Correctness over elegance
-
-Explicit safety over clever abstractions
-
-Real hardware behavior over theoretical purity
-
-The codebase is intentionally conservative, verbose, and defensive.
-
-12. Conclusion
-
-PHREG is a production-grade pH controller built for environments where failure has real consequences.
-It reflects real-world engineering constraints rather than academic idealization.
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/maulik-italiya/)
+[![GitHub](https://img.shields.io/badge/GitHub-181717?style=flat&logo=github&logoColor=white)](https://github.com/MaulikItaliya)
